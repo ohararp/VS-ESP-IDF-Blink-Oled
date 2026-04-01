@@ -18,6 +18,8 @@
 #include "esp_log.h"
 #include "led_strip.h"
 #include "sdkconfig.h"
+#include "esp_app_desc.h"
+#include "ota_update.h"
 
 static const char *TAG = "example";
 
@@ -34,6 +36,22 @@ static const char *TAG = "example";
 #define OLED_H         32
 
 static uint16_t s_hue = 0;
+
+/* OTA button */
+#define OTA_BUTTON_GPIO CONFIG_OTA_BUTTON_GPIO
+
+/* OTA display state (written by callback from OTA task, read by main loop) */
+static volatile int s_ota_percent = -1;
+static char s_ota_status[16] = "";
+
+static void ota_progress_callback(int percent, const char *status_msg)
+{
+    s_ota_percent = percent;
+    if (status_msg) {
+        strncpy(s_ota_status, status_msg, sizeof(s_ota_status) - 1);
+        s_ota_status[sizeof(s_ota_status) - 1] = '\0';
+    }
+}
 
 /* ───────────────── Minimal 5x7 bitmap font (ASCII 32-126) ───────────────── */
 
@@ -161,6 +179,30 @@ static void oled_draw_hue_bar(int y, int height, uint16_t hue)
     for (int dx = -2; dx <= 2; dx++) {
         for (int r = 0; r < height; r++) {
             oled_set_pixel(marker_x + dx, y + r);
+        }
+    }
+}
+
+static void oled_draw_progress_bar(int y, int height, int percent)
+{
+    /* Draw border */
+    for (int x = 0; x < OLED_W; x++) {
+        oled_set_pixel(x, y);
+        oled_set_pixel(x, y + height - 1);
+    }
+    oled_set_pixel(0, y);
+    oled_set_pixel(OLED_W - 1, y);
+    for (int r = 0; r < height; r++) {
+        oled_set_pixel(0, y + r);
+        oled_set_pixel(OLED_W - 1, y + r);
+    }
+    /* Fill based on percent */
+    if (percent > 0) {
+        int fill_w = ((OLED_W - 4) * percent) / 100;
+        for (int x = 2; x < 2 + fill_w; x++) {
+            for (int r = 2; r < height - 2; r++) {
+                oled_set_pixel(x, y + r);
+            }
         }
     }
 }
@@ -315,29 +357,65 @@ void app_main(void)
     /* Initialize the OLED display */
     oled_init();
 
+    /* Configure OTA button (active-low with pull-up) */
+    gpio_config_t btn_cfg = {
+        .pin_bit_mask = (1ULL << OTA_BUTTON_GPIO),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&btn_cfg);
+
+    /* Register OTA progress callback */
+    ota_set_progress_callback(ota_progress_callback);
+
     char line_buf[22]; /* 21 chars max per line + null */
+    int btn_debounce = 0;
 
     while (1) {
-        /* Get the RGB values that will be set this cycle */
-        uint8_t r, g, b;
-        hsv_to_rgb(s_hue, 255, 32, &r, &g, &b);
+        /* Check OTA button (active-low) */
+        if (gpio_get_level(OTA_BUTTON_GPIO) == 0) {
+            btn_debounce++;
+            if (btn_debounce == 3 && !ota_is_in_progress()) {
+                ESP_LOGI(TAG, "OTA button pressed, starting update...");
+                ota_start_update();
+            }
+        } else {
+            btn_debounce = 0;
+        }
 
-        ESP_LOGI(TAG, "Hue: %d  R:%d G:%d B:%d", s_hue, r, g, b);
-
-        /* Update LED */
+        /* Update LED (keeps running during OTA as alive indicator) */
         blink_led();
 
         /* Update OLED display */
         oled_clear();
 
-        snprintf(line_buf, sizeof(line_buf), "HUE: %3d", s_hue);
-        oled_draw_str(0, 0, line_buf);
+        if (ota_is_in_progress()) {
+            /* OTA progress display */
+            oled_draw_str(0, 0, "OTA UPDATE");
+            oled_draw_str(0, 10, s_ota_status);
+            int pct = s_ota_percent;
+            if (pct >= 0) {
+                oled_draw_progress_bar(22, 9, pct);
+            }
+        } else {
+            /* Normal display with version */
+            const esp_app_desc_t *app = esp_app_get_description();
+            uint8_t r, g, b;
+            hsv_to_rgb(s_hue, 255, 32, &r, &g, &b);
 
-        snprintf(line_buf, sizeof(line_buf), "R:%3d G:%3d B:%3d", r, g, b);
-        oled_draw_str(0, 10, line_buf);
+            ESP_LOGI(TAG, "Hue: %d  R:%d G:%d B:%d", s_hue, r, g, b);
 
-        /* Hue position bar at bottom */
-        oled_draw_hue_bar(22, 9, s_hue);
+            snprintf(line_buf, sizeof(line_buf), "V%.5s H:%3d", app->version, s_hue);
+            oled_draw_str(0, 0, line_buf);
+
+            snprintf(line_buf, sizeof(line_buf), "R:%3d G:%3d B:%3d", r, g, b);
+            oled_draw_str(0, 10, line_buf);
+
+            /* Hue position bar at bottom */
+            oled_draw_hue_bar(22, 9, s_hue);
+        }
 
         oled_flush();
 

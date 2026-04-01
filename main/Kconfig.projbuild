@@ -58,4 +58,32 @@ menu "Example Configuration"
         help
             GPIO number for I2C SCL to the SSD1306 OLED display.
 
+    menu "OTA Update Configuration"
+
+        config OTA_WIFI_SSID
+            string "WiFi SSID for OTA"
+            default "MYSSID"
+            help
+                WiFi network name used when connecting for OTA updates.
+
+        config OTA_WIFI_PASSWORD
+            string "WiFi Password for OTA"
+            default "MYPASSWORD"
+            help
+                WiFi password used when connecting for OTA updates.
+
+        config OTA_FIRMWARE_URL
+            string "OTA Firmware URL"
+            default "https://github.com/ohararp/VS-ESP-IDF-Blink-Oled/releases/latest/download/blink.bin"
+            help
+                URL to download the firmware binary for OTA update.
+
+        config OTA_BUTTON_GPIO
+            int "OTA trigger button GPIO"
+            default 39
+            help
+                GPIO number for the button that triggers OTA update (active-low).
+
+    endmenu
+
 endmenu
