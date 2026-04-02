@@ -159,6 +159,9 @@ static void ota_task(void *pvParameter)
     esp_http_client_config_t http_config = {
         .url = CONFIG_OTA_FIRMWARE_URL,
         .crt_bundle_attach = esp_crt_bundle_attach,
+        .buffer_size = 10240,
+        .buffer_size_tx = 10240,
+        .max_redirection_count = 5,
     };
 
     esp_https_ota_config_t ota_config = {
