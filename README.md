@@ -93,6 +93,8 @@ The project uses ESP-IDF's `TWO_OTA` partition scheme with 16MB flash:
     ├── Kconfig.projbuild
     ├── idf_component.yml
     ├── blink_example_main.c
+    ├── oled_display.h
+    ├── oled_display.c
     ├── ota_update.h
     └── ota_update.c
 ```
